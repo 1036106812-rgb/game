@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medieval Pixel Town</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #171717;
+      color: white;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      margin: 12px 0 4px;
+      font-size: 24px;
+    }
+
+    p {
+      margin: 4px 0 12px;
+      color: #cfcfcf;
+    }
+
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      border: 6px solid #3b2f24;
+      background: #75a957;
+      width: 768px;
+      max-width: 94vw;
+    }
+
+    .panel {
+      margin-top: 12px;
+      background: #2a211b;
+      border: 3px solid #6b4b2a;
+      padding: 12px 16px;
+      width: 760px;
+      max-width: 90vw;
+      color: #f2e2bd;
+      box-sizing: border-box;
+      min-height: 68px;
+    }
+
+    .controls {
+      color: #bdbdbd;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Medieval Pixel Town</h1>
+  <p>Collect coins, talk to villagers, and avoid the slime.</p>
+
+  <canvas id="game" width="384" height="256"></canvas>
+
+  <div class="panel">
+    <div id="message">Welcome to the town. Find the coins before sunset.</div>
+    <div class="controls">Move: Arrow Keys / WASD ｜ Talk: Space ｜ Restart: R</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const message = document.getElementById("message");
+
+    const TILE = 16;
+    const COLS = canvas.width / TILE;
+    const ROWS = canvas.height / TILE;
+
+    const keys = {};
+
+    let player;
+    let coins;
+    let villagers;
+    let slime;
+    let score;
+    let gameOver;
+
+    const map = [
+      "########################",
+      "#..........#...........#",
+      "#..HHH.....#.....HHH...#",
+      "#..H.H...........H.H...#",
+      "#..HHH.....###...HHH...#",
+      "#......................#",
+      "#......TT.......TT.....#",
+      "#......TT.......TT.....#",
+      "#......................#",
+      "#....HHH...............#",
+      "#....H.H.....FFFF......#",
+      "#....HHH.....F..F......#",
+      "#............FFFF......#",
+      "#......................#",
+      "#..........PP..........#",
+      "########################"
+    ];
+
+    function resetGame() {
+      player = {
+        x: 2 * TILE,
+        y: 2 * TILE,
+        w: 12,
+        h: 12,
+        speed: 2,
+        facing: "down"
+      };
+
+      coins = [
+        { x: 6 * TILE, y: 3 * TILE, taken: false },
+        { x: 18 * TILE, y: 4 * TILE, taken: false },
+        { x: 5 * TILE, y: 12 * TILE, taken: false },
+        { x: 20 * TILE, y: 12 * TILE, taken: false },
+        { x: 12 * TILE, y: 7 * TILE, taken: false }
+      ];
+
+      villagers = [
+        {
+          x: 9 * TILE,
+          y: 5 * TILE,
+          text: "Old Mason: The well road is safe, but the slime hates bells."
+        },
+        {
+          x: 16 * TILE,
+          y: 10 * TILE,
+          text: "Merchant: Coins shine brightest after rain."
+        },
+        {
+          x: 11 * TILE,
+          y: 13 * TILE,
+          text: "Guard: Stay away from the green beast."
+        }
+      ];
+
+      slime = {
+        x: 19 * TILE,
+        y: 8 * TILE,
+        w: 12,
+        h: 12,
+        dx: 1.2,
+        dy: 0
+      };
+
+      score = 0;
+      gameOver = false;
+      message.textContent = "Welcome to the town. Find the coins before sunset.";
+    }
+
+    function drawRect(x, y, w, h, color) {
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
+    }
+
+    function drawTile(x, y, type) {
+      const px = x * TILE;
+      const py = y * TILE;
+
+      if (type === "#") {
+        drawRect(px, py, TILE, TILE, "#4c3424");
+        drawRect(px + 1, py + 1, TILE - 2, TILE - 2, "#6a4a32");
+      } else if (type === "H") {
+        drawRect(px, py, TILE, TILE, "#8b5a2b");
+        drawRect(px + 2, py + 2, TILE - 4, TILE - 4, "#b8793e");
+      } else if (type === "T") {
+        drawRect(px + 6, py + 8, 4, 8, "#5a371e");
+        drawRect(px + 3, py + 2, 10, 10, "#2f7d32");
+      } else if (type === "F") {
+        drawRect(px, py, TILE, TILE, "#5661a8");
+        drawRect(px + 3, py + 3, TILE - 6, TILE - 6, "#6f79c9");
+      } else if (type === "P") {
+        drawRect(px, py, TILE, TILE, "#7a6240");
+        drawRect(px + 2, py + 2, TILE - 4, TILE - 4, "#a78554");
+      } else {
+        drawRect(px, py, TILE, TILE, "#77a95b");
+        drawRect(px, py + 14, TILE, 2, "#6c9d52");
+      }
+    }
+
+    function drawMap() {
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          drawTile(x, y, map[y][x]);
+        }
+      }
+    }
+
+    function isBlocked(x, y, w, h) {
+      const corners = [
+        [x, y],
+        [x + w, y],
+        [x, y + h],
+        [x + w, y + h]
+      ];
+
+      for (const [cx, cy] of corners) {
+        const tx = Math.floor(cx / TILE);
+        const ty = Math.floor(cy / TILE);
+
+        if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return true;
+
+        const tile = map[ty][tx];
+        if (tile === "#" || tile === "H" || tile === "T" || tile === "F") {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    function movePlayer() {
+      if (gameOver) return;
+
+      let dx = 0;
+      let dy = 0;
+
+      if (keys["ArrowUp"] || keys["w"]) {
+        dy = -player.speed;
+        player.facing = "up";
+      }
+      if (keys["ArrowDown"] || keys["s"]) {
+        dy = player.speed;
+        player.facing = "down";
+      }
+      if (keys["ArrowLeft"] || keys["a"]) {
+        dx = -player.speed;
+        player.facing = "left";
+      }
+      if (keys["ArrowRight"] || keys["d"]) {
+        dx = player.speed;
+        player.facing = "right";
+      }
+
+      const nextX = player.x + dx;
+      const nextY = player.y + dy;
+
+      if (!isBlocked(nextX, player.y, player.w, player.h)) {
+        player.x = nextX;
+      }
+
+      if (!isBlocked(player.x, nextY, player.w, player.h)) {
+        player.y = nextY;
+      }
+    }
+
+    function drawPlayer() {
+      drawRect(player.x + 2, player.y + 2, 8, 8, "#f1c27d");
+      drawRect(player.x + 1, player.y + 8, 10, 6, "#315a9c");
+      drawRect(player.x + 3, player.y + 1, 6, 3, "#5b3924");
+
+      if (player.facing === "left") {
+        drawRect(player.x, player.y + 8, 3, 3, "#d9d9d9");
+      } else if (player.facing === "right") {
+        drawRect(player.x + 10, player.y + 8, 3, 3, "#d9d9d9");
+      }
+    }
+
+    function drawCoins() {
+      for (const coin of coins) {
+        if (!coin.taken) {
+          drawRect(coin.x + 4, coin.y + 4, 8, 8, "#d6a21d");
+          drawRect(coin.x + 6, coin.y + 5, 4, 5, "#ffe27a");
+        }
+      }
+    }
+
+    function drawVillagers() {
+      for (const v of villagers) {
+        drawRect(v.x + 3, v.y + 2, 8, 8, "#f0b27a");
+        drawRect(v.x + 2, v.y + 8, 10, 6, "#7b3f98");
+      }
+    }
+
+    function moveSlime() {
+      if (gameOver) return;
+
+      slime.x += slime.dx;
+
+      if (isBlocked(slime.x, slime.y, slime.w, slime.h)) {
+        slime.dx *= -1;
+        slime.x += slime.dx * 2;
+      }
+    }
+
+    function drawSlime() {
+      drawRect(slime.x + 1, slime.y + 5, 12, 8, "#2f9e44");
+      drawRect(slime.x + 3, slime.y + 3, 8, 5, "#51cf66");
+      drawRect(slime.x + 4, slime.y + 7, 2, 2, "#111");
+      drawRect(slime.x + 9, slime.y + 7, 2, 2, "#111");
+    }
+
+    function rectsOverlap(a, b) {
+      return (
+        a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
+      );
+    }
+
+    function checkCoins() {
+      for (const coin of coins) {
+        if (!coin.taken) {
+          const coinBox = { x: coin.x + 3, y: coin.y + 3, w: 10, h: 10 };
+          if (rectsOverlap(player, coinBox)) {
+            coin.taken = true;
+            score++;
+            message.textContent = "Coin collected. Score: " + score + " / " + coins.length;
+
+            if (score === coins.length) {
+              gameOver = true;
+              message.textContent = "You collected all coins. The town celebrates your name.";
+            }
+          }
+        }
+      }
+    }
+
+    function checkSlime() {
+      const slimeBox = { x: slime.x, y: slime.y, w: slime.w, h: slime.h };
+
+      if (rectsOverlap(player, slimeBox)) {
+        gameOver = true;
+        message.textContent = "The slime caught you. Press R to restart.";
+      }
+    }
+
+    function talk() {
+      if (gameOver) return;
+
+      for (const v of villagers) {
+        const distance = Math.hypot(player.x - v.x, player.y - v.y);
+        if (distance < 24) {
+          message.textContent = v.text;
+          return;
+        }
+      }
+
+      message.textContent = "No one is close enough to talk.";
+    }
+
+    function drawHUD() {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.fillRect(0, 0, canvas.width, 20);
+
+      ctx.fillStyle = "#fff0c2";
+      ctx.font = "10px monospace";
+      ctx.fillText("Coins: " + score + " / " + coins.length, 8, 13);
+
+      if (gameOver) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#fff0c2";
+        ctx.font = "18px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(score === coins.length ? "Victory" : "Game Over", canvas.width / 2, canvas.height / 2 - 8);
+
+        ctx.font = "10px monospace";
+        ctx.fillText("Press R to restart", canvas.width / 2, canvas.height / 2 + 14);
+        ctx.textAlign = "left";
+      }
+    }
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      movePlayer();
+      moveSlime();
+      checkCoins();
+      checkSlime();
+
+      drawMap();
+      drawCoins();
+      drawVillagers();
+      drawSlime();
+      drawPlayer();
+      drawHUD();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    window.addEventListener("keydown", (e) => {
+      keys[e.key] = true;
+
+      if (e.key === " ") {
+        e.preventDefault();
+        talk();
+      }
+
+      if (e.key.toLowerCase() === "r") {
+        resetGame();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      keys[e.key] = false;
+    });
+
+    resetGame();
+    gameLoop();
+  </script>
+</body>
+</html>
